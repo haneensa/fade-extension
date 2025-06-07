@@ -141,9 +141,10 @@ vector<ColumnBinding> LogicalLineageOperator::GetColumnBindings() {
 }
 
 // TODO: support distinct yet.
-void get_agg_info(unique_ptr<AggInfo>& info, vector<unique_ptr<Expression>>& aggs) {
+void get_agg_info(unique_ptr<AggInfo>& info, vector<unique_ptr<Expression>>& aggs, vector<LogicalType>& payload_types) {
   if (LineageState::debug) std::cout << "get_agg_info: " << info->n_groups_attr << " " << aggs.size() << std::endl;
   int include_count = false;
+  idx_t count_idx = aggs.size();
   // -1 excluding the lineage capture function
   for (idx_t i=0;  i < aggs.size()-1; ++i) {
     auto &agg_expr = aggs[i]->Cast<BoundAggregateExpression>();
@@ -151,6 +152,7 @@ void get_agg_info(unique_ptr<AggInfo>& info, vector<unique_ptr<Expression>>& agg
     if (LineageState::debug) std::cout << i << " agg: " << name << std::endl;
 		if (include_count == false && (name == "count" || name == "count_star")) {
 			include_count = true;
+      count_idx = i;
 			continue;
 		} else if (name == "avg") {
 			include_count = true;
@@ -163,15 +165,40 @@ void get_agg_info(unique_ptr<AggInfo>& info, vector<unique_ptr<Expression>>& agg
       D_ASSERT(agg_expr.children[0]->type == ExpressionType::BOUND_REF);
       auto &bound_ref_expr = agg_expr.children[0]->Cast<BoundReferenceExpression>();
 			int col_idx = bound_ref_expr.index; 
-      LogicalType &typ = agg_expr.return_type;
-			info->alloc_vars_funcs[i] = name;
-      info->alloc_vars_types[i] = typ;
-      info->alloc_vars_col_idx[i] = col_idx;
+      LogicalType ret_typ = LogicalType::FLOAT;
+      LogicalType default_typ = LogicalType::FLOAT;
+      if (payload_types[col_idx] == LogicalType::INTEGER ||
+          payload_types[col_idx] == LogicalType::BIGINT) {
+           default_typ = LogicalType::INTEGER;
+           ret_typ = LogicalType::INTEGER;
+      }
+      info->payload_data.push_back({col_idx, default_typ});
+
+      string sum_func_key = "sum_" + to_string(i);
+      vector<string> sub_aggs_list = {sum_func_key};
+      info->sub_aggs[sum_func_key] = make_uniq<SubAggsContext>("sum", default_typ, col_idx, i);
+
+      if (name == "stddev") {
+        string sum_2_func_key = "sum_2_" + to_string(i);
+        info->sub_aggs[sum_2_func_key] = make_uniq<SubAggsContext>("sum_2", LogicalType::FLOAT, col_idx, i);
+        sub_aggs_list.push_back(sum_2_func_key);
+        ret_typ = LogicalType::FLOAT;
+      }
+      if (name == "avg" || name == "stddev") {
+        sub_aggs_list.push_back("count");
+        include_count = true;
+        ret_typ = LogicalType::FLOAT;
+      }
+      info->aggs[i] = make_uniq<AggFuncContext>(name, ret_typ, std::move(sub_aggs_list));
     }
   }
-  
-  if (include_count) 
-    info->count_idx = aggs.size();
+
+  if (include_count) {
+    info->sub_aggs["count"] = make_uniq<SubAggsContext>("count", LogicalType::INTEGER, 0, 0);
+    vector<string> sub_aggs_list = {"count"};
+    info->aggs[count_idx] = make_uniq<AggFuncContext>("count", LogicalType::INTEGER,
+                                              std::move(sub_aggs_list));
+  }
   
   // TODO: check if this has another child aggregate. set: has_agg_child and child_agg_id
 }
@@ -200,22 +227,24 @@ unique_ptr<PhysicalOperator> LogicalLineageOperator::CreatePlan(ClientContext &c
 
   if (this->dependent_type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY) {
     auto &agg_info = LineageState::qid_plans[query_id][operator_id]->agg_info;
+    auto agg_types = child->children[0]->GetTypes();
 	  if (child->type == PhysicalOperatorType::HASH_GROUP_BY) {
 			PhysicalHashAggregate * gb = dynamic_cast<PhysicalHashAggregate *>(child.get());
 			auto &aggregates = gb->grouped_aggregate_data.aggregates;
-      get_agg_info(agg_info, aggregates);
+      get_agg_info(agg_info, aggregates, agg_types);
     } else if (child->type == PhysicalOperatorType::PERFECT_HASH_GROUP_BY) {
 			PhysicalPerfectHashAggregate * gb = dynamic_cast<PhysicalPerfectHashAggregate *>(child.get());
       auto &aggregates = gb->aggregates;
-      get_agg_info(agg_info, aggregates);
+      get_agg_info(agg_info, aggregates, agg_types);
     } else {
       PhysicalUngroupedAggregate * gb = dynamic_cast<PhysicalUngroupedAggregate *>(child.get());
 			auto &aggregates = gb->aggregates;
-      get_agg_info(agg_info, aggregates);
+      get_agg_info(agg_info, aggregates, agg_types);
     }
     // Replace agg child with caching op
     auto agg_child = std::move(child->children[0]);
-    child->children[0] = make_uniq<PhysicalCachingOperator>(types, std::move(agg_child), operator_id, query_id);
+    child->children[0] = make_uniq<PhysicalCachingOperator>(agg_types, std::move(agg_child), operator_id, query_id);
+
   }
 
   return make_uniq<PhysicalLineageOperator>(types, std::move(child), operator_id, query_id, dependent_type,

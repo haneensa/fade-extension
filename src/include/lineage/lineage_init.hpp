@@ -3,16 +3,67 @@
 
 namespace duckdb {
 
+// TODO: write custom function extraction from Expression
+// TODO: write custom function evaluation
+// TODO: write custom function output reading
+// TODO: write custom function global vals
+
+//  static CreateContext(Expression) -> extract types, payload idx, etc; create SubAggs
+//
+struct AggFuncContext {
+  string name;
+  vector<string> sub_aggs;
+  LogicalType return_type;
+
+  vector<int> groups_count;
+  vector<float> groups_sum;
+  vector<float> groups_sum_2;
+
+  AggFuncContext(string name, LogicalType ret_typ, vector<string> sub_aggs)
+    : name(name), return_type(ret_typ), sub_aggs(sub_aggs) {}
+};
+
+// sub class SubAgggsContext
+// SumFunc:
+//  groupby_agg_incremental_group_bw();
+//  groupby_agg_incremental_arr_forward();
+//  ReadOutput();
+//  has groups_sum
+//
+// CountFunc:
+//  has groups_count
+//
+// AvgFunc:
+//  has groups_sum and groups_count
+// stddevFunc:
+//  hash groups_sum, groups_count, groups_sum_2
+
+//  payload is allocated and populated independently alloc_vars too
+struct SubAggsContext {
+  string name;
+  idx_t payload_idx;
+  LogicalType return_type;
+  idx_t parent_idx;
+  SubAggsContext(string name, LogicalType return_type, idx_t payload_idx, idx_t parent_idx) :
+    name(name), return_type(return_type), payload_idx(payload_idx), parent_idx(parent_idx) {}
+};
+
 struct AggInfo {
+  // map<sub_id, fun_name> aggregations are decomposed into 0-n functions
+  unordered_map<string, unique_ptr<SubAggsContext>> sub_aggs;
+  // map<agg_id, AggContext>  contains the agg name, the sub functions ids
+  unordered_map<idx_t, unique_ptr<AggFuncContext>> aggs;
+  vector<pair<idx_t, LogicalType>> payload_data;
+
   int child_agg_id;
   bool has_agg_child;
   idx_t n_groups_attr;
-  int count_idx = -1;
-	std::unordered_map<int, void*> input_data_map; // input to the aggregates
-	std::unordered_map<int, LogicalType> alloc_vars_types; // attr type per output
-	std::unordered_map<int, string> alloc_vars_funcs; // ith aggregate function name
-	std::unordered_map<int, idx_t> alloc_vars_col_idx; // ith aggregate function name
-  vector<std::pair<vector<Vector>, int>> cached_cols;
+	
+  std::unordered_map<int, void*> input_data_map; // input to the aggregates
+  unordered_map<int, LogicalType> input_data_types_map;
+  
+  unordered_map<int, vector<Vector>> cached_cols;
+  vector<int> cached_cols_sizes;
 };
 
 // tree of lineage points (ignore pipelined operators because we pipeline their lineage)
@@ -22,7 +73,11 @@ struct LineageInfoNode {
   vector<idx_t> children;
   int n_output;
   int n_input;
+  string table_name;
+  vector<string> columns;
   unique_ptr<AggInfo> agg_info;
+  vector<int> lineage1D;
+  vector<vector<int>> lineage2D;
   LineageInfoNode(idx_t opid, LogicalOperatorType type) : opid(opid), type(type),
   n_output(0), n_input(-1) {}
 };
@@ -33,16 +88,15 @@ struct LineageState {
    static bool capture;
    static bool persist;
    static bool debug;
-   static idx_t table_idx;
    static std::unordered_map<string, LogicalOperatorType> lineage_types;
    static std::unordered_map<string, vector<std::pair<Vector, int>>> lineage_store;
    static std::unordered_map<idx_t, unordered_map<idx_t, unique_ptr<LineageInfoNode>>> qid_plans;
    static std::unordered_map<idx_t, idx_t> qid_plans_roots;
 };
 
-
-
 unique_ptr<LogicalOperator> AddLineage(OptimizerExtensionInput &input,
                                       unique_ptr<LogicalOperator>& plan);
+
+bool IsSPJUA(unique_ptr<LogicalOperator>& plan);
 
 } // namespace duckdb

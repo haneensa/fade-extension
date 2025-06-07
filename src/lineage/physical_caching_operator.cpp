@@ -31,11 +31,13 @@ public:
 	  auto &agg_info = LineageState::qid_plans[query_id][operator_id]->agg_info;
     if (!agg_info->cached_cols.empty()) return;
     agg_info->cached_cols = std::move(cached_cols);
+    agg_info->cached_cols_sizes = std::move(cached_cols_sizes);
 
     LineageState::qid_plans[query_id][operator_id]->n_input = n_input;
   }
    
-  vector<std::pair<vector<Vector>, int>> cached_cols;
+  unordered_map<int, vector<Vector>> cached_cols;
+  vector<int> cached_cols_sizes;
   idx_t query_id;
   idx_t operator_id;
   idx_t n_input;
@@ -53,26 +55,18 @@ OperatorResultType PhysicalCachingOperator::Execute(ExecutionContext &context,
                          OperatorState &state_p) const {
     auto &state = state_p.Cast<PhysicalCachingState>();
     state.n_input += input.size();
-   // if (LineageState::debug) {
-      std::cout << "[PhysicalCachingOperator]:" << query_id << " " << operator_id << " " <<  input.ColumnCount() << std::endl;
-      for (auto &type : input.GetTypes()) { std::cout << type.ToString() << " "; }
-      std::cout << "\n -------" << std::endl;
-   // }
-
     // reference payload from the input
     chunk.Reference(input);
     
-    // Extract annotations payload from left input
     if (LineageState::persist) {
 	    auto &agg_info = LineageState::qid_plans[query_id][operator_id]->agg_info;
-      state.cached_cols.emplace_back();
-      for (auto& out_var : agg_info->alloc_vars_col_idx) {
-        int col_idx = out_var.second;
+      for (auto& out_var : agg_info->payload_data) {
+        int col_idx = out_var.first;
         Vector annotations(input.data[col_idx].GetType());
         VectorOperations::Copy(input.data[col_idx], annotations, input.size(), 0, 0);
-        state.cached_cols.back().first.push_back(std::move(annotations));
+        state.cached_cols[col_idx].push_back(std::move(annotations));
       }
-      state.cached_cols.back().second = input.size();
+      state.cached_cols_sizes.push_back(input.size());
     }
 
     return OperatorResultType::NEED_MORE_INPUT;

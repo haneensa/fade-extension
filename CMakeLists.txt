@@ -25,6 +25,7 @@ set(EXTENSION_SOURCES
     src/lineage/physical_caching_operator.cpp
     src/fade/fade_node.cpp
     src/fade/fade_reader.cpp
+    src/fade/fade_get_predicate.cpp
     src/fade/fade_sparse.cpp
 )
 

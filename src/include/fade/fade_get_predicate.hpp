@@ -10,30 +10,27 @@
 
 namespace duckdb {
 
-struct FadeReaderBindData : public TableFunctionData {
-  idx_t out_var;
-  string fname;
-  idx_t n_interventions;
-  idx_t n_groups;
+struct GetPredicatesBindData : public TableFunctionData {
+  string res;
 };
 
-struct FadeReaderLocalState : public LocalTableFunctionState {
+struct GetPredicatesLocalState : public LocalTableFunctionState {
   idx_t offset = 0;
 };
 
-struct FadeReaderGlobalState : public GlobalTableFunctionState {
+struct GetPredicatesGlobalState : public GlobalTableFunctionState {
 };
 
-class FadeReaderFunction {
+class GetPredicatesFunction {
   public:
-    static void FadeReaderImplementation(ClientContext &context, TableFunctionInput &data_p, DataChunk &output);
-    static unique_ptr<FunctionData> FadeReaderBind(ClientContext &context, TableFunctionBindInput &input,
+    static void GetPredicatesImplementation(ClientContext &context, TableFunctionInput &data_p, DataChunk &output);
+    static unique_ptr<FunctionData> GetPredicatesBind(ClientContext &context, TableFunctionBindInput &input,
                                                     vector<LogicalType> &return_types, vector<string> &names);
-    static unique_ptr<GlobalTableFunctionState> FadeReaderInitGlobal(ClientContext &context,
+    static unique_ptr<GlobalTableFunctionState> GetPredicatesInitGlobal(ClientContext &context,
                                                                       TableFunctionInitInput &input);
     static unique_ptr<LocalTableFunctionState>
-    FadeReaderInitLocal(ExecutionContext &context, TableFunctionInitInput &input, GlobalTableFunctionState *gstate_p);
-    static unique_ptr<TableRef> FadeReaderReplacement(ClientContext &context, ReplacementScanInput &input,
+    GetPredicatesInitLocal(ExecutionContext &context, TableFunctionInitInput &input, GlobalTableFunctionState *gstate_p);
+    static unique_ptr<TableRef> GetPredicatesReplacement(ClientContext &context, ReplacementScanInput &input,
         optional_ptr<ReplacementScanData> data);
     static TableFunctionSet GetFunctionSet();
     static unique_ptr<NodeStatistics> Cardinality(ClientContext &context, const FunctionData *bind_data);

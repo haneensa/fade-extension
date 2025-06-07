@@ -11,65 +11,47 @@ enum InterventionType {
 	SEARCH
 };
 
-struct EvalConfig {
-	static int batch;
-	static int mask_size;
-	static bool is_scalar;
-	static bool use_duckdb;
-	static bool debug;
-	static bool prune;
-	static bool incremental;
-	static int num_worker;
-	static bool use_gb_backward_lineage;
-	static bool use_preprep_tm;
-	static string columns_spec_str;
-	static InterventionType intervention_type;
-};
-
-
 class FadeNode {
-
 public:
-  bool debug;
+  explicit FadeNode(idx_t qid, idx_t opid) : qid(qid), opid(opid), n_interventions(0), num_worker(1),
+  aggid(-1), counter(0), debug(false) {}
+
+	virtual ~FadeNode() {}
+public:
+  idx_t qid;
   int opid;
   int aggid;
   int n_interventions;
   int num_worker;
-
   int counter;
+  vector<int> groups;
+  
+  bool debug;
 
-	virtual ~FadeNode() {}
   // holds post interventions output. n_output X n_interventions per worker
-	std::unordered_map<idx_t, vector<void*>> alloc_vars;
+	std::unordered_map<string, vector<void*>> alloc_vars;
 };
 
 
 class FadeSparseNode : public FadeNode {
 public:
-/*	FadeSparseNode(int opid, int n_interventions, int num_worker, int rows, bool debug)
-	    : FadeNode(opid, n_interventions, num_worker, rows, debug) {};
-*/
+  explicit FadeSparseNode(idx_t qid, idx_t opid) : FadeNode(qid, opid) {}
 	virtual ~FadeSparseNode() {}
 public:
 	unique_ptr<int[]> annotations;
 };
 
-/*
-class FadeNodeSingle: public FadeNode {
+class FadeSingleNode: public FadeNode {
 public:
-	FadeNodeSingle(int opid, int n_interventions, int num_worker, int rows, bool debug)
-	    : FadeNode(opid, n_interventions, num_worker, rows, debug) {};
-
-	virtual ~FadeNodeSingle() = default; // Virtual destructor
+  explicit FadeSingleNode(idx_t qid, idx_t opid) : FadeNode(qid, opid) {}
+	virtual ~FadeSingleNode() = default; // Virtual destructor
 
 public:
 	int8_t* single_del_interventions;
-	int8_t* base_single_del_interventions;
 };
-*/
 
-void PrepareFadePlan(idx_t qid, idx_t opid, std::unordered_map<idx_t, unique_ptr<FadeNode>>& fade_data);
+void prepare_fade_plan(idx_t qid, idx_t opid, std::unordered_map<idx_t, unique_ptr<FadeNode>>& fade_data,
+                      unordered_map<string, vector<string>>& spec_map);
 pair<int, int> get_start_end(int row_count, int thread_id, int num_worker);
-std::unordered_map<std::string, std::vector<std::string>>  parseSpec(string& columns_spec_str);
 
 } // namespace duckdb
